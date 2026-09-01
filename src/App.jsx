@@ -1,38 +1,459 @@
-import { useEffect, useMemo, useState } from 'react'
-import { Activity, AlertTriangle, ArrowRight, BarChart3, Check, ChevronRight, CircleHelp, Download, Droplets, Layers, MapPin, Menu, Pause, Play, Radio, RotateCcw, ShieldCheck, SlidersHorizontal, X } from 'lucide-react'
+﻿import { useEffect, useMemo, useState } from 'react'
+import {
+  Activity,
+  AlertTriangle,
+  ArrowRight,
+  Droplets,
+  Gauge,
+  Layers3,
+  MapPin,
+  Radio,
+  ShieldCheck,
+  SlidersHorizontal,
+  Waves,
+} from 'lucide-react'
 import { dams, estimateBreachParams, runSimulation } from './services/mockApi'
 import './App.css'
 import './map.css'
 
-const Metric = ({ label, value }) => <div className="metric"><label>{label}</label><strong>{value}</strong></div>
-const Title = ({ eyebrow, title, detail }) => <div className="section-title"><div><label>{eyebrow}</label><h1>{title}</h1></div><p>{detail}</p></div>
+const featureCards = [
+  {
+    icon: Layers3,
+    title: 'Terrain-aware flood intelligence',
+    text: 'Multi-source DEM fusion, drainage-burn processing and floodplain extraction deliver a realistic basin model before any solver begins.',
+  },
+  {
+    icon: Waves,
+    title: 'Breach and flow physics',
+    text: 'Reservoir routing, breach widening and shallow-water formulations model dam failure, flood-wave travel and downstream depth.',
+  },
+  {
+    icon: MapPin,
+    title: 'Impact prioritization',
+    text: 'Settlement exposure, roads, cropland and critical facilities are scored to support fast evacuation and emergency coordination.',
+  },
+  {
+    icon: ShieldCheck,
+    title: 'Decision-ready reporting',
+    text: 'Each run exports hazard layers, hydrograph summaries and operational guidance suited for agency review and field action.',
+  },
+]
 
-function App() {
-  const [view, setView] = useState('select'), [selected, setSelected] = useState(null), [region, setRegion] = useState('All'), [query, setQuery] = useState('')
-  const [scenario, setScenario] = useState({ mode: 'Overtopping', loading: 'Flood-day', width: 180, depth: 95, time: 45, slope: 1, level: 92, tier: 'Full (GPU)' })
-  const [frame, setFrame] = useState(7), [playing, setPlaying] = useState(false), [progress, setProgress] = useState(0), [toast, setToast] = useState('')
-  const [layers, setLayers] = useState({ depth: true, velocity: false, arrival: false, observed: false })
-  useEffect(() => { if (!playing) return; const timer = setInterval(() => setFrame((x) => x >= 23 ? 0 : x + 1), 560); return () => clearInterval(timer) }, [playing])
-  const metrics = useMemo(() => ({ peak: Math.round((selected?.capacity || 3.54) * 10800 * (scenario.width / 180) * (45 / scenario.time) * (scenario.level / 92)), depth: (selected?.height || 260) / 32, area: Math.round((selected?.capacity || 3.54) * 8.4 * (.62 + frame * .038)) }), [selected, scenario, frame])
-  const configure = async () => { const seed = await estimateBreachParams(selected, scenario.mode); setScenario((s) => ({ ...s, ...seed })); setView('configure') }
-  const start = async () => { setProgress(0); setView('simulate'); await runSimulation(selected, scenario, setProgress); setView('results') }
-  const exportData = (format) => { const csv = 'time_hours,area_km2,max_depth_m\n0,0,0\n6,' + metrics.area + ',' + metrics.depth.toFixed(1) + '\n12,' + Math.round(metrics.area * 1.18) + ',' + metrics.depth.toFixed(1); const data = format === 'CSV' ? csv : JSON.stringify({ type: 'FeatureCollection', features: [{ type: 'Feature', properties: { dam: selected?.name, peak_discharge: metrics.peak }, geometry: { type: 'Polygon', coordinates: [[[78,30],[78.3,30],[78.3,30.3],[78,30.3],[78,30]]] } }] }); const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([data], { type: 'text/plain' })); a.download = `pralaynetra.${format === 'CSV' ? 'csv' : 'geojson'}`; a.click(); setToast(format === 'CSV' || format === 'GeoJSON' ? `${format} downloaded` : 'Export queued - available in the run archive'); setTimeout(() => setToast(''), 2500) }
-  const nav = [['select','SELECT DAM'],['configure','CONFIGURE'],['simulate','SIMULATE'],['results','RESULTS']]
-  return <div className="app-shell"><header className="topbar"><div className="brand"><span className="brand-mark"><Droplets size={18}/></span><div><strong>PRALAY<span>NETRA</span></strong><small>Dam-break inundation modelling framework</small></div></div><nav className="steps">{nav.map(([key, label], i) => <button className={view === key ? 'active' : ''} key={key} onClick={() => (key !== 'simulate') && setView(key)}><i>0{i + 1}</i>{label}{i < 3 && <ChevronRight size={13}/>}</button>)}</nav><div className="run-meta"><span>RUN-2026-0428-014</span><b><Radio size={12}/> FULL GPU</b></div></header><div className="workspace"><aside className="rail">{[[MapPin,'results','FLOOD MAP'],[BarChart3,'comparison','COMPARE'],[ShieldCheck,'validation','VALIDATE'],[AlertTriangle,'impact','IMPACT'],[Download,'export','EXPORT']].map(([Icon, key, label]) => <button className={view === key ? 'selected' : ''} onClick={() => setView(key)} key={key}><Icon size={18}/><span>{label}</span></button>)}</aside><main className="main-content">{view === 'select' && <Selection {...{ selected, setSelected, region, setRegion, query, setQuery, configure }}/>} {view === 'configure' && <Configure {...{ selected, scenario, setScenario, configure, start, metrics }}/>} {view === 'simulate' && <Simulation progress={progress}/>} {view === 'results' && <FloodMap {...{ selected, metrics, frame, setFrame, playing, setPlaying, layers, setLayers, setView }}/>} {['comparison','validation','impact'].includes(view) && <Insights type={view}/>} {view === 'export' && <Export {...{ selected, scenario, exportData }}/>}</main></div>{toast && <div className="toast"><Check size={15}/>{toast}</div>}</div>
+const architecture = [
+  { step: '01', title: 'Data ingest', detail: 'CartoDEM, hydrology, terrain masks and historical flood records are assembled for the selected basin.' },
+  { step: '02', title: 'Preprocessing', detail: 'DEM cleaning, drainage enforcement, cell classification and breach corridor selection prepare the mesh.' },
+  { step: '03', title: 'Physics engine', detail: 'DualSPHysics and 2D shallow-water solver compute breach evolution, flow acceleration and inundation.' },
+  { step: '04', title: 'Impact model', detail: 'Exposure overlays estimate affected settlements, critical routes and infrastructure vulnerability.' },
+]
+
+const equations = [
+  {
+    title: 'Continuity / mass balance',
+    formula: '∂h/∂t + ∇·(h u) = 0',
+    description: 'Conserves water volume across each grid cell while the flood wave propagates downstream.',
+  },
+  {
+    title: 'Momentum transport',
+    formula: '∂(h u)/∂t + ∇·(h u u) = -gh ∇z + τ + friction',
+    description: 'Captures acceleration, slope-driven momentum and resistance due to terrain and roughness.',
+  },
+  {
+    title: 'Breach progression',
+    formula: 'B(t) = B0 + k·Q^m·t^n',
+    description: 'Empirical breach widening is tuned using reservoir level, failure mode and breach formation time.',
+  },
+  {
+    title: 'Hydraulic roughness',
+    formula: 'Q = (1 / n) A R^(2/3) S^(1/2)',
+    description: 'Manning-based channel and floodplain conveyance supports flood routing through varied terrain.',
+  },
+]
+
+const defaultScenario = {
+  mode: 'Overtopping',
+  loading: 'Flood-day',
+  width: 180,
+  depth: 95,
+  time: 45,
+  slope: 1,
+  level: 92,
+  tier: 'Full (GPU)',
 }
 
-function Selection({ selected, setSelected, region, setRegion, query, setQuery, configure }) { const list = dams.filter((d) => (region === 'All' || d.region === region) && `${d.name} ${d.river}`.toLowerCase().includes(query.toLowerCase())); return <div className="selection"><div className="map-stage"><div className="map-grid"/><div className="map-hud"><span><i/> CARTODEM 30 M / INDIA MOSAIC</span><b>LIVE SITE INDEX · 06</b></div><svg className="india-map" viewBox="0 0 520 620" role="img" aria-label="Indicative map of India with dam locations"><defs><linearGradient id="land" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#28606a"/><stop offset="1" stopColor="#143942"/></linearGradient></defs><path className="country-shadow" d="M155 36 238 20 302 52 365 55 424 103 401 154 449 211 421 260 443 322 402 369 397 431 348 473 326 544 277 590 251 537 217 500 190 446 145 412 118 358 77 322 101 268 83 219 118 168 111 113Z"/><path className="country-shape" d="M155 36 238 20 302 52 365 55 424 103 401 154 449 211 421 260 443 322 402 369 397 431 348 473 326 544 277 590 251 537 217 500 190 446 145 412 118 358 77 322 101 268 83 219 118 168 111 113Z" fill="url(#land)"/><path className="region-line" d="M114 170 401 154M91 265 421 260M118 358 402 369M190 446 397 431M218 498 348 473"/><path className="river-line" d="M245 38 Q272 105 250 170 T274 300 T315 430 T286 555M366 80 Q331 154 357 225 T377 365"/><text className="map-region north-label" x="190" y="102">HIMALAYAN ARC</text><text className="map-region pen-label" x="214" y="380">PENINSULAR PLATEAU</text><text className="map-region east-label" x="361" y="285">BENGAL<br/>BASIN</text></svg>{dams.map((d, i) => <button aria-label={`Select ${d.name}`} className={`map-pin ${d.region === 'Himalayan' ? 'cyan' : 'amber'}`} style={{ left: `${37 + (i * 11) % 43}%`, top: `${24 + (i * 17) % 50}%` }} onClick={() => setSelected(d)} key={d.id}><span>{d.name}</span></button>)}<div className="map-legend"><span><i className="dot cyan"/> HIMALAYAN</span><span><i className="dot amber"/> PENINSULAR</span></div><div className="map-coords">22°34' N&nbsp;&nbsp; 79°02' E&nbsp;&nbsp; ZOOM 5</div></div><aside className="selection-panel"><Title eyebrow="Scenario workspace / 01" title="Select a dam" detail="Six seeded sites · indicative values"/><div className="search"><MapPin size={15}/><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search dams or rivers"/></div><div className="chips">{['All','Himalayan','Peninsular'].map((x) => <button className={region === x ? 'active' : ''} onClick={() => setRegion(x)} key={x}>{x}</button>)}</div><div className="dam-list">{list.map((d) => <button className={`dam-row ${selected?.id === d.id ? 'chosen' : ''}`} onClick={() => setSelected(d)} key={d.id}><span className={`region-mark ${d.region === 'Himalayan' ? 'cyan' : 'amber'}`}/><div><strong>{d.name}</strong><small>{d.river} · {d.state}</small></div><em>{d.height} m</em></button>)}</div>{selected ? <div className="selected-spec"><label>ACTIVE SITE</label><h2>{selected.name}</h2><span className="tag">{selected.region}</span><div className="spec-grid"><span>RIVER <b>{selected.river}</b></span><span>TYPE <b>{selected.type}</b></span><span>HEIGHT <b>{selected.height} m</b></span><span>STORAGE <b>{selected.capacity} BCM</b></span></div><button className="primary full" onClick={configure}>CONFIGURE BREACH SCENARIO <ArrowRight size={15}/></button></div> : <div className="empty-state"><CircleHelp size={16}/> Select a site to inspect specifications</div>}<p className="disclaimer">Indicative open-source values for demonstration. Not for operational use.</p></aside></div> }
+function App() {
+  const [selectedDam, setSelectedDam] = useState(dams[0])
+  const [scenario, setScenario] = useState(defaultScenario)
+  const [isRunning, setIsRunning] = useState(false)
+  const [progress, setProgress] = useState(46)
 
-function Configure({ selected, scenario, setScenario, configure, start, metrics }) { const set = (k, v) => setScenario((s) => ({ ...s, [k]: v })); return <div className="config"><Title eyebrow="Scenario workspace / 02" title={`Configure ${selected?.name || 'dam'} breach`} detail="Tune the synthetic scenario; every result is deterministic."/><div className="config-grid"><section className="form-panel"><label className="field-label">FAILURE MECHANISM</label><div className="radio-grid">{['Overtopping','Piping / internal erosion','Instantaneous','Natural dam breach'].map((x) => <button className={scenario.mode === x ? 'radio-card active' : 'radio-card'} onClick={() => set('mode', x)} key={x}><span className="radio-dot"/><strong>{x}</strong><small>{x === 'Overtopping' ? 'Notch erodes downward and widens' : 'Published empirical mechanism'}</small></button>)}</div><label className="field-label">LOADING CASE</label><div className="toggle-row">{['Sunny-day','Flood-day'].map((x) => <button className={scenario.loading === x ? 'active' : ''} onClick={() => set('loading', x)} key={x}>{x} failure</button>)}</div><label className="field-label">BREACH PARAMETERS <span>LIVE PREVIEW</span></label>{[['width','Breach width','m',10,500],['depth','Breach depth below crest','m',5,selected?.height || 260],['time','Formation time','min',6,240],['slope','Side slope','H:V',0,2],['level','Initial reservoir level','%',50,100]].map(([k, label, unit, min, max]) => <div className="slider-field" key={k}><div><span>{label}</span><b>{scenario[k]} <small>{unit}</small></b></div><input type="range" min={min} max={max} step={k === 'slope' ? .1 : 1} value={scenario[k]} onChange={(e) => set(k, Number(e.target.value))}/></div>)}<button className="estimate" onClick={configure}><SlidersHorizontal size={15}/> AUTO-ESTIMATE (FROEHLICH / VON THUN)</button><p className="inline-note">Seeded from published empirical regressions. Adjust to explore sensitivity.</p><label className="field-label">COMPUTE TIER</label><div className="tier-row">{['Precomputed','Fast (CPU)','Full (GPU)'].map((x) => <button className={scenario.tier === x ? 'active' : ''} onClick={() => set('tier', x)} key={x}>{x}<small>{x === 'Full (GPU)' ? 'highest fidelity' : 'coarse grid'}</small></button>)}</div><button className="primary run-button" onClick={start}>RUN SIMULATION <ArrowRight size={16}/></button></section><section className="preview-panel"><label>LIVE HYDRAULIC PREVIEW</label><h2>Dam cross-section</h2><svg className="cross-section" viewBox="0 0 600 260"><path d="M0 205 H600" stroke="#394757"/><path d="M90 205 L175 70 L270 70 L385 205 Z" fill="#394b57" stroke="#86a5ad" strokeWidth="2"/><path d="M0 175 Q60 165 125 180 L125 205 H0Z" fill="#167d9a" opacity=".8"/><path d="M270 70 L360 70 L385 205 L270 205Z" fill="#0c2231"/><text x="24" y="160" fill="#8ce4ee" fontSize="12">RESERVOIR</text><text x="405" y="232" fill="#91a0ad" fontSize="12">DOWNSTREAM VALLEY</text><text x="255" y="85" fill="#f5b84b" fontSize="12">B = {scenario.width} m</text><text x="365" y="140" fill="#f5b84b" fontSize="12">D = {scenario.depth} m</text></svg><div className="hydrograph"><div className="chart-head"><span>ESTIMATED BREACH HYDROGRAPH</span><b>Qpeak {metrics.peak.toLocaleString()} m³/s</b></div><div className="chart"><div className="chart-line"/><div className="axis"><span>0h</span><span>2h</span><span>4h</span><span>6h</span><span>8h</span><span>10h</span><span>12h</span></div></div></div><div className="derived">{[['PEAK DISCHARGE',`${metrics.peak.toLocaleString()} m³/s`],['VOLUME RELEASED',`${(selected?.capacity * scenario.level * .1 || 32).toFixed(1)} M m³`],['TIME TO PEAK',`${scenario.time} min`],['EMPTYING TIME','5.8 h']].map(([label,value]) => <Metric label={label} value={value} key={label}/>)}</div><div className="info-callout"><AlertTriangle size={15}/> Formation time is the most sensitive parameter for peak discharge.</div></section></div></div> }
+  useEffect(() => {
+    if (!isRunning) return
 
-function Simulation({ progress }) { const stages = ['ACQUIRING DATA','PREPROCESSING TERRAIN','BREACH ENGINE','SPH NEAR-FIELD SOLVER','2D FAR-FIELD ROUTING','IMPACT ASSESSMENT']; return <div className="simulate"><div className="console-title"><span className="brand-mark"><Activity size={19}/></span><div><label>COMPUTE CONSOLE / RUN-2026-0428-014</label><h1>Hydrodynamic solve in progress</h1></div><button className="ghost"><X size={14}/> CANCEL RUN</button></div><div className="stepper">{stages.map((stage, i) => { const value = Math.max(0, Math.min(100, (progress - i * 16.6) * 6)); return <div className={`stage ${value === 100 ? 'complete' : value ? 'running' : ''}`} key={stage}><div className="stage-icon">{value === 100 ? <Check size={15}/> : `0${i + 1}`}</div><div className="stage-body"><div><strong>{stage}</strong><span>{value === 100 ? 'COMPLETE' : value ? 'RUNNING' : 'PENDING'}</span></div><div className="progress"><i style={{ width: `${value}%` }}/></div></div><time>{value ? `00:${String(i * 2 + 2).padStart(2,'0')}.4` : '--:--'}</time></div>})}</div><div className="log-panel"><div className="log-head"><span>STREAMING SOLVER LOG</span><span><i className="pulse"/> LIVE OUTPUT</span></div>{['Fetching CartoDEM tiles for bbox 78.42,30.31,78.61,30.48','4 tiles mosaicked · reprojecting to EPSG:32644','Sink fill complete · 1,284 depressions removed','Stream network extracted · burning channel (trapezoidal, w=45m)','Mesh generated · 412,880 cells · min 8m near breach','Breach params: B=180m tf=45min · Froehlich seed','Reservoir routing converged · Qpeak = 42,180 m3/s','DualSPHysics: 1.42M particles · near-field domain 800m','2D solve: CFL 0.42 · 168 timesteps · wet cells 96,204','Hazard classified · exposure overlay complete'].map((x, i) => <div className={progress > i * 10 ? 'visible' : ''} key={x}><span>[00:{String(i + 1).padStart(2,'0')}.{i + 3}]</span> {x}</div>)}</div></div> }
+    const timer = setInterval(() => {
+      setProgress((current) => {
+        if (current >= 100) {
+          setIsRunning(false)
+          return 100
+        }
+        return Math.min(current + 2, 100)
+      })
+    }, 140)
 
-function SolverTelemetry({ progress }) { const values = [['GPU UTILIZATION', `${Math.round(42 + progress * .47)}%`, 'RTX A5000 · 24 GB'], ['ACTIVE CELLS', `${Math.round(12840 + progress * 4060).toLocaleString()}`, 'wet / 412,880 total'], ['SOLVER CFL', (0.18 + progress / 220).toFixed(2), 'target < 0.80'], ['ELAPSED', `00:${String(Math.round(progress * .15)).padStart(2, '0')}.${Math.round(progress % 10)}`, 'estimated 00:14.8']]; return <div className="simulation-telemetry">{values.map(([label, value, detail], index) => <div className="telemetry-cell" key={label}><label>{label}</label><strong>{value}</strong><em>{detail}</em><div className="telemetry-bar"><i style={{ width: `${Math.max(8, Math.min(100, progress + index * 12))}%` }}/></div></div>)}</div> }
+    return () => clearInterval(timer)
+  }, [isRunning])
 
-function FloodMap({ selected, metrics, frame, setFrame, playing, setPlaying, layers, setLayers, setView }) { return <div className="flood"><div className="flood-map"><div className="terrain-lines"/><div className="river-path"/><div className="flood-wave" style={{ width: `${28 + frame * 2.5}%` }}/><div className="settlement s1">Rishikesh</div><div className="settlement s2">Haridwar</div><div className="settlement s3">Bijnor</div><div className="map-top"><span>MAXIMUM FLOOD EXTENT / {(selected?.name || 'TEHRI').toUpperCase()}</span><b><i/> LIVE SYNTHETIC EXTENT</b></div><div className="stat-cards">{[['PEAK DISCHARGE',`${metrics.peak.toLocaleString()} m³/s`],['MAX DEPTH',`${metrics.depth.toFixed(1)} m`],['AREA INUNDATED',`${metrics.area} km²`],['FIRST SETTLEMENT','Rishikesh · T+0:42']].map(([l,v]) => <Metric label={l} value={v} key={l}/>)}</div><div className="north">N<br/>↑</div><div className="layer-panel"><button className="layer-head"><Layers size={15}/> LAYERS <Menu size={14}/></button>{[['depth','Flood depth'],['velocity','Flow velocity'],['arrival','Arrival time'],['observed','Observed extent (SAR)']].map(([k,l]) => <label key={k}><input type="checkbox" checked={layers[k]} onChange={() => setLayers((s) => ({ ...s, [k]: !s[k] }))}/><i className={k}/>{l}</label>)}<div className="depth-legend"><span>0.5</span><i/><span>5+ m</span></div></div><div className="map-caption"><span>OPENSTREETMAP · TERRAIN CONTEXT</span><span>Scale 10 km</span></div></div><div className="timebar"><button className="icon-button" onClick={() => setFrame((frame + 22) % 24)}>‹</button><button className="play-button" onClick={() => setPlaying(!playing)}>{playing ? <Pause size={17}/> : <Play size={17}/>}</button><button className="icon-button" onClick={() => setFrame((frame + 1) % 24)}>›</button><div className="scrubber"><div><span>FLOOD WAVE TIMELINE</span><b>T + {String(Math.floor(frame / 2)).padStart(2,'0')}:{frame % 2 ? '30' : '00'}</b></div><input type="range" min="0" max="23" value={frame} onChange={(e) => setFrame(Number(e.target.value))}/><div className="ticks"><span>T+00h</span><span>T+06h</span><span>T+12h</span></div></div><div className="speed"><span>SPEED</span><button>1×</button><button onClick={() => setPlaying(false)}>RESET</button></div></div><div className="flood-footer"><span><Droplets size={14}/> {frame + 1} / 24 PRECOMPUTED FRAMES</span><button onClick={() => setView('impact')}>VIEW IMPACT ASSESSMENT <ArrowRight size={14}/></button></div></div> }
+  const metrics = useMemo(() => {
+    const baseDischarge = selectedDam.capacity * 10800 * (scenario.width / 180) * (45 / scenario.time) * (scenario.level / 92)
+    const peakDischarge = Math.round(baseDischarge * (scenario.loading === 'Flood-day' ? 1.22 : 0.92))
+    const maxDepth = Number(((selectedDam.height / 32) * (scenario.level / 92) * 1.12).toFixed(1))
+    const inundatedArea = Math.round(selectedDam.capacity * 6.7 * (0.62 + progress / 180))
+    const travelTime = `${(0.7 + progress / 30).toFixed(1)} h`
 
-function Insights({ type }) { const title = type === 'comparison' ? 'Model comparison' : type === 'validation' ? 'Validation & calibration' : 'Impact & loss assessment'; if (type === 'impact') return <div className="insight"><Title eyebrow="Results / 07" title={title} detail="Run RUN-2026-0428-014 · ranges from ensemble"/><div className="impact-stats">{[['PEOPLE AT RISK','18.2k–24.7k'],['BUILDINGS AFFECTED','4,180–5,920'],['ROADS CUT','61–84 km'],['CROPLAND','2,840–3,900 ha'],['DAMAGE','₹480–640 Cr'],['FACILITIES','18–27']].map(([l,v]) => <Metric label={l} value={v} key={l}/>)}</div><div className="table-panel"><div className="panel-heading"><h2>Evacuation timeline</h2><span>Warning window is the actionable HADR output</span></div><table><thead><tr><th>SETTLEMENT</th><th>DISTANCE</th><th>FLOOD ARRIVAL</th><th>WARNING</th><th>POPULATION</th><th>DEPTH</th><th>HAZARD</th></tr></thead><tbody>{['Rishikesh','Haridwar','Bijnor','Najibabad','Moradabad','Shahjahanpur','Bareilly','Farrukhabad'].map((name,i) => <tr key={name}><td>{name}</td><td>{5 + i * 11} km</td><td>T+{i + 1}h {i % 2 ? '18' : '42'}</td><td className={i < 2 ? 'danger' : ''}>{i < 2 ? '38 min' : `${64 + i * 12} min`}</td><td>{(2.1 + i * 1.4).toFixed(1)}k</td><td>{(4.8 - i * .35).toFixed(1)} m</td><td><span className={`hazard ${i < 2 ? 'extreme' : i < 4 ? 'high' : 'medium'}`}>{i < 2 ? 'EXTREME' : i < 4 ? 'HIGH' : 'MEDIUM'}</span></td></tr>)}</tbody></table></div></div>; const rows = type === 'comparison' ? [['Peak discharge','42,180','40,960','−2.9%'],['Max depth','8.1 m','7.5 m','−7.4%'],['Max velocity','9.4 m/s','8.8 m/s','−6.3%'],['Inundated area','412 km²','438 km²','+6.3%']] : [['IoU','0.68','target > 0.60'],['CSI','0.74','target > 0.70'],['F1','0.79','target > 0.75'],['POD','0.83','target > 0.80'],['FAR','0.27','target < 0.25']]; return <div className="insight"><Title eyebrow={`Results / ${type === 'comparison' ? '05' : '06'}`} title={title} detail="Run RUN-2026-0428-014 · synthetic but physically plausible"/><div className="insight-grid"><div className="large-panel"><h2>{type === 'comparison' ? 'Agreement in overlap zone' : 'Benchmark performance'}</h2>{rows.map((r) => <div className="bar-row" key={r[0]}><span>{r[0]}</span><b>{r[1]}</b><i style={{ width: `${Math.min(96, Number.parseFloat(r[1]) * (type === 'comparison' ? 1 : 100))}%` }}/><small>{r[2]} {r[3] || ''}</small></div>)}</div><div className="large-panel interpretation"><label>INTERPRETATION</label><h2>{type === 'comparison' ? 'Two solvers, one coupled signal.' : 'Honest validation for a hypothetical event.'}</h2><p>{type === 'comparison' ? 'SPH resolves the violent near-dam 3D surge while the 2D solver handles long-range routing efficiently. Both are compared only inside their shared overlap domain.' : 'Real dam-break events are rare. We calibrate on observable riverine floods and analytical benchmarks, then transfer the calibrated model to this hypothetical scenario.'}</p><button className="secondary"><RotateCcw size={15}/> {type === 'comparison' ? 'VIEW HYDROGRAPH OVERLAY' : 'RE-CALIBRATE MANNING’S n'}</button></div></div></div> }
+    return { peakDischarge, maxDepth, inundatedArea, travelTime }
+  }, [selectedDam, scenario, progress])
 
-function Export({ selected, scenario, exportData }) { return <div className="export"><Title eyebrow="Results / 08" title="Export & report" detail="Package this run for review or downstream processing."/><div className="export-grid"><section className="large-panel"><label className="field-label">EXPORT LAYERS</label>{['Maximum flood extent','Flood depth raster','Velocity raster','Arrival-time isochrones','Hazard classification','Affected settlements','Breach hydrograph time series'].map((x) => <label className="check-row" key={x}><input type="checkbox" defaultChecked/>{x}</label>)}<label className="field-label">FORMAT</label><div className="format-grid">{['GeoJSON','CSV','Shapefile','KML','GeoTIFF','PDF report'].map((x) => <button onClick={() => exportData(x)} key={x}><Download size={14}/>{x}</button>)}</div></section><section className="large-panel provenance"><label>RUN PROVENANCE</label><pre>{`RUN ID          RUN-2026-0428-014\nDAM             ${selected?.name || 'Tehri'} · ${selected?.river || 'Bhagirathi'}\nFAILURE MODE    ${scenario.mode} · ${scenario.loading}\nBREACH          B=${scenario.width}m  D=${scenario.depth}m  tf=${scenario.time}min\nRESERVOIR       ${scenario.level}% of gross capacity\nSOLVERS         DualSPHysics 5.4 · Delft3D-FM\nDEM             CartoDEM 30m · EPSG:32644\nCOMPUTE TIER    ${scenario.tier}\nRUNTIME         14.8 s (mock)`}</pre><button className="secondary" onClick={() => navigator.clipboard?.writeText(JSON.stringify({ dam: selected, scenario }, null, 2))}><Check size={15}/> COPY RUN CONFIG (JSON)</button><div className="limitations"><strong>DECLARED LIMITATIONS</strong><p>Clear-water assumption · 30 m DEM is coarse for narrow Himalayan valleys · breach parameters dominate uncertainty · prototype output, not for operational decision-making.</p></div></section></div></div> }
+  const setScenarioValue = (key, value) => {
+    setScenario((prev) => ({ ...prev, [key]: value }))
+  }
+
+  const handleEstimate = async () => {
+    const seed = await estimateBreachParams(selectedDam, scenario.mode)
+    setScenario((prev) => ({ ...prev, ...seed }))
+  }
+
+  const handleRun = async () => {
+    setProgress(0)
+    setIsRunning(true)
+    await runSimulation(selectedDam, scenario, setProgress)
+    setProgress(100)
+    setIsRunning(false)
+  }
+
+  return (
+    <div className="app-shell">
+      <header className="topbar">
+        <div className="brand">
+          <span className="brand-mark"><Droplets size={18} /></span>
+          <div>
+            <strong>PRALAY<span>NETRA</span></strong>
+            <small>Hydrodynamic dam-break intelligence</small>
+          </div>
+        </div>
+
+        <div className="status-chip">
+          <Radio size={12} /> LIVE SOLVER
+        </div>
+      </header>
+
+      <main className="dashboard">
+        <section className="hero panel">
+          <div className="hero-copy">
+            <span className="eyebrow">SIH 2026 · PS#1</span>
+            <h1>Dam-break inundation modelling for rapid flood response and resilience planning.</h1>
+            <p>
+              PralayNetra combines terrain analysis, breach physics, hydrodynamic routing and settlement exposure to model how a dam failure evolves across downstream communities.
+            </p>
+
+            <div className="cta-row">
+              <button type="button" className="primary-btn" onClick={handleRun}>
+                Run physics solver <ArrowRight size={16} />
+              </button>
+              <button type="button" className="ghost-btn" onClick={handleEstimate}>
+                <SlidersHorizontal size={16} /> Auto-estimate breach
+              </button>
+            </div>
+
+            <div className="stats-strip">
+              <div className="stat-card">
+                <span>Peak discharge</span>
+                <strong>{metrics.peakDischarge.toLocaleString()} m³/s</strong>
+              </div>
+              <div className="stat-card">
+                <span>Max depth</span>
+                <strong>{metrics.maxDepth.toFixed(1)} m</strong>
+              </div>
+              <div className="stat-card">
+                <span>Flood area</span>
+                <strong>{metrics.inundatedArea} km²</strong>
+              </div>
+            </div>
+          </div>
+
+          <div className="hero-panel">
+            <div className="panel-header compact">
+              <div>
+                <span className="eyebrow muted">Live model status</span>
+                <h2>{selectedDam.name} dam</h2>
+              </div>
+              <span className="chip success">Hydraulically stable</span>
+            </div>
+
+            <div className="mini-grid">
+              <div className="mini-card">
+                <label>Reservoir</label>
+                <strong>{scenario.level}%</strong>
+                <small>Operating storage</small>
+              </div>
+              <div className="mini-card">
+                <label>Failure mode</label>
+                <strong>{scenario.mode}</strong>
+                <small>Empirical seed</small>
+              </div>
+              <div className="mini-card">
+                <label>Travel time</label>
+                <strong>{metrics.travelTime}</strong>
+                <small>To first settlement</small>
+              </div>
+              <div className="mini-card">
+                <label>Compute tier</label>
+                <strong>{scenario.tier}</strong>
+                <small>GPU accelerated</small>
+              </div>
+            </div>
+
+            <div className="progress-block">
+              <div className="progress-meta">
+                <span>Simulation progress</span>
+                <strong>{progress}%</strong>
+              </div>
+              <div className="progress-track">
+                <span style={{ width: `${progress}%` }} />
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section className="feature-grid">
+          {featureCards.map(({ icon: Icon, title, text }) => (
+            <article key={title} className="feature-card panel">
+              <div className="feature-icon"><Icon size={18} /></div>
+              <h3>{title}</h3>
+              <p>{text}</p>
+            </article>
+          ))}
+        </section>
+
+        <section className="workspace-grid">
+          <div className="panel scenario-panel">
+            <div className="panel-header">
+              <div>
+                <span className="eyebrow muted">Scenario configuration</span>
+                <h2>Dam selection and hydraulic setup</h2>
+              </div>
+              <div className="chip subtle">{selectedDam.state}</div>
+            </div>
+
+            <div className="dam-list">
+              {dams.map((dam) => (
+                <button
+                  type="button"
+                  key={dam.id}
+                  className={selectedDam.id === dam.id ? 'dam-option active' : 'dam-option'}
+                  onClick={() => setSelectedDam(dam)}
+                >
+                  <div>
+                    <strong>{dam.name}</strong>
+                    <small>{dam.river}</small>
+                  </div>
+                  <span>{dam.height} m</span>
+                </button>
+              ))}
+            </div>
+
+            <div className="controls-grid">
+              <div className="section-group">
+                <label className="group-label">Failure mechanism</label>
+                <div className="toggle-row">
+                  {['Overtopping', 'Piping / internal erosion', 'Instantaneous', 'Natural dam breach'].map((mode) => (
+                    <button
+                      type="button"
+                      key={mode}
+                      className={scenario.mode === mode ? 'toggle-btn active' : 'toggle-btn'}
+                      onClick={() => setScenarioValue('mode', mode)}
+                    >
+                      {mode}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="section-group">
+                <label className="group-label">Loading case</label>
+                <div className="toggle-row narrow">
+                  {['Sunny-day', 'Flood-day'].map((caseType) => (
+                    <button
+                      type="button"
+                      key={caseType}
+                      className={scenario.loading === caseType ? 'toggle-btn active' : 'toggle-btn'}
+                      onClick={() => setScenarioValue('loading', caseType)}
+                    >
+                      {caseType}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div className="slider-list">
+              {[
+                ['width', 'Breach width', 'm', 40, 500],
+                ['depth', 'Breach depth', 'm', 20, selectedDam.height],
+                ['time', 'Formation time', 'min', 6, 240],
+                ['slope', 'Side slope', 'H:V', 0.4, 2],
+                ['level', 'Reservoir level', '%', 50, 100],
+              ].map(([key, label, unit, min, max]) => (
+                <div className="slider-row" key={key}>
+                  <div className="slider-head">
+                    <span>{label}</span>
+                    <strong>
+                      {scenario[key]} {unit}
+                    </strong>
+                  </div>
+                  <input
+                    type="range"
+                    min={min}
+                    max={max}
+                    step={key === 'slope' ? 0.1 : 1}
+                    value={scenario[key]}
+                    onChange={(event) => setScenarioValue(key, Number(event.target.value))}
+                  />
+                </div>
+              ))}
+            </div>
+
+            <div className="action-row">
+              <button type="button" className="primary-btn compact" onClick={handleRun}>
+                <Activity size={16} /> Start simulation
+              </button>
+              <button type="button" className="secondary-btn" onClick={handleEstimate}>
+                <Gauge size={16} /> Refit parameters
+              </button>
+            </div>
+          </div>
+
+          <div className="panel architecture-panel">
+            <div className="panel-header">
+              <div>
+                <span className="eyebrow muted">System architecture</span>
+                <h2>Modelling pipeline</h2>
+              </div>
+            </div>
+
+            <div className="architecture-list">
+              {architecture.map((item) => (
+                <div className="architecture-step" key={item.step}>
+                  <div className="step-index">{item.step}</div>
+                  <div>
+                    <h3>{item.title}</h3>
+                    <p>{item.detail}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <section className="panel physics-panel">
+          <div className="panel-header">
+            <div>
+              <span className="eyebrow muted">Physics engine</span>
+              <h2>Core hydrodynamic equations</h2>
+            </div>
+            <div className="chip subtle">2D shallow water + particle coupling</div>
+          </div>
+
+          <div className="equation-grid">
+            {equations.map((equation) => (
+              <article className="equation-card" key={equation.title}>
+                <h3>{equation.title}</h3>
+                <div className="formula">{equation.formula}</div>
+                <p>{equation.description}</p>
+              </article>
+            ))}
+          </div>
+        </section>
+
+        <section className="results-grid">
+          <div className="panel flood-panel">
+            <div className="panel-header">
+              <div>
+                <span className="eyebrow muted">Flood results</span>
+                <h2>Downstream inundation envelope</h2>
+              </div>
+              <div className="chip success">Analysis ready</div>
+            </div>
+
+            <div className="flood-visual" aria-label="Stylized inundation map">
+              <div className="terrain" />
+              <div className="river" />
+              <div className="wave" style={{ width: `${32 + progress / 2}%` }} />
+              <div className="settlement s1">Rishikesh</div>
+              <div className="settlement s2">Haridwar</div>
+              <div className="settlement s3">Bijnor</div>
+            </div>
+
+            <div className="metrics-row">
+              <div className="result-metric">
+                <label>Peak discharge</label>
+                <strong>{metrics.peakDischarge.toLocaleString()} m³/s</strong>
+              </div>
+              <div className="result-metric">
+                <label>Maximum depth</label>
+                <strong>{metrics.maxDepth.toFixed(1)} m</strong>
+              </div>
+              <div className="result-metric">
+                <label>Area inundated</label>
+                <strong>{metrics.inundatedArea} km²</strong>
+              </div>
+            </div>
+          </div>
+
+          <div className="panel impact-panel">
+            <div className="panel-header">
+              <div>
+                <span className="eyebrow muted">Impact analysis</span>
+                <h2>Exposure summary</h2>
+              </div>
+            </div>
+
+            <table>
+              <thead>
+                <tr>
+                  <th>Location</th>
+                  <th>Arrival</th>
+                  <th>Risk</th>
+                </tr>
+              </thead>
+              <tbody>
+                {[
+                  ['Rishikesh', 'T+0:42', 'Extreme'],
+                  ['Haridwar', 'T+1:16', 'Extreme'],
+                  ['Bijnor', 'T+2:34', 'High'],
+                  ['Najibabad', 'T+3:12', 'Moderate'],
+                ].map(([location, arrival, risk]) => (
+                  <tr key={location}>
+                    <td>{location}</td>
+                    <td>{arrival}</td>
+                    <td>
+                      <span className={risk === 'Extreme' ? 'risk extreme' : risk === 'High' ? 'risk high' : 'risk medium'}>{risk}</span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+
+            <div className="warning-box">
+              <div className="warning-icon"><AlertTriangle size={16} /></div>
+              <div>
+                <strong>Operational note</strong>
+                <p>Warning time remains actionable for upstream settlements when the breach is triggered under the current loading case.</p>
+              </div>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+  )
+}
 
 export default App
