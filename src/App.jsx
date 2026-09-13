@@ -12,7 +12,7 @@ import {
   SlidersHorizontal,
   Waves,
 } from 'lucide-react'
-import { dams, estimateBreachParams, runSimulation } from './services/mockApi'
+import { dams, estimateBreachParams, fetchImpactAssessment, fetchValidationMetrics, runSimulation } from './services/mockApi'
 import './App.css'
 import './map.css'
 
@@ -85,6 +85,8 @@ function App() {
   const [scenario, setScenario] = useState(defaultScenario)
   const [isRunning, setIsRunning] = useState(false)
   const [progress, setProgress] = useState(46)
+  const [validation, setValidation] = useState(null)
+  const [impact, setImpact] = useState(null)
 
   useEffect(() => {
     if (!isRunning) return
@@ -116,6 +118,11 @@ function App() {
     setScenario((prev) => ({ ...prev, [key]: value }))
   }
 
+  const handleSelectDam = (dam) => {
+    setSelectedDam(dam)
+    setScenario((prev) => ({ ...prev, depth: Math.min(prev.depth, dam.height) }))
+  }
+
   const handleEstimate = async () => {
     const seed = await estimateBreachParams(selectedDam, scenario.mode)
     setScenario((prev) => ({ ...prev, ...seed }))
@@ -124,7 +131,13 @@ function App() {
   const handleRun = async () => {
     setProgress(0)
     setIsRunning(true)
-    await runSimulation(selectedDam, scenario, setProgress)
+    const result = await runSimulation(selectedDam, scenario, setProgress)
+    const [validationResult, impactResult] = await Promise.all([
+      fetchValidationMetrics(result.runId),
+      fetchImpactAssessment(result.runId),
+    ])
+    setValidation(validationResult)
+    setImpact(impactResult)
     setProgress(100)
     setIsRunning(false)
   }
@@ -249,7 +262,7 @@ function App() {
                   type="button"
                   key={dam.id}
                   className={selectedDam.id === dam.id ? 'dam-option active' : 'dam-option'}
-                  onClick={() => setSelectedDam(dam)}
+                  onClick={() => handleSelectDam(dam)}
                 >
                   <div>
                     <strong>{dam.name}</strong>
@@ -383,13 +396,27 @@ function App() {
               <div className="chip success">Analysis ready</div>
             </div>
 
-            <div className="flood-visual" aria-label="Stylized inundation map">
+            <div className="flood-visual" aria-label={`${selectedDam.name} inundation map`}>
+              <div className="map-toolbar">
+                <span><i /> LIVE HAZARD LAYER</span>
+                <span>UTM 44N · 30 m DEM</span>
+              </div>
               <div className="terrain" />
+              <div className="contours contours-a" />
+              <div className="contours contours-b" />
               <div className="river" />
               <div className="wave" style={{ width: `${32 + progress / 2}%` }} />
-              <div className="settlement s1">Rishikesh</div>
-              <div className="settlement s2">Haridwar</div>
-              <div className="settlement s3">Bijnor</div>
+              <div className="dam-marker"><span /> {selectedDam.name.toUpperCase()} DAM</div>
+              {selectedDam.downstream.slice(0, 3).map(([location], index) => (
+                <div className={`settlement s${index + 1}`} key={location}>{location}</div>
+              ))}
+              <div className="map-north">N<br /><span>↑</span></div>
+              <div className="map-scale"><span /> 10 km</div>
+              <div className="map-legend">
+                <span><i className="legend-low" /> 0.1–1 m</span>
+                <span><i className="legend-mid" /> 1–3 m</span>
+                <span><i className="legend-high" /> 3 m+</span>
+              </div>
             </div>
 
             <div className="metrics-row">
@@ -425,12 +452,7 @@ function App() {
                 </tr>
               </thead>
               <tbody>
-                {[
-                  ['Rishikesh', 'T+0:42', 'Extreme'],
-                  ['Haridwar', 'T+1:16', 'Extreme'],
-                  ['Bijnor', 'T+2:34', 'High'],
-                  ['Najibabad', 'T+3:12', 'Moderate'],
-                ].map(([location, arrival, risk]) => (
+                {selectedDam.downstream.map(([location, arrival, risk]) => (
                   <tr key={location}>
                     <td>{location}</td>
                     <td>{arrival}</td>
@@ -449,7 +471,48 @@ function App() {
                 <p>Warning time remains actionable for upstream settlements when the breach is triggered under the current loading case.</p>
               </div>
             </div>
+
+            <div className="gee-validation">
+              <div className="validation-head">
+                <div>
+                  <span className="eyebrow muted">Google Earth Engine</span>
+                  <strong>Satellite validation</strong>
+                </div>
+                <span className={validation ? 'validation-status ready' : 'validation-status'}>{validation ? 'Verified' : 'Awaiting run'}</span>
+              </div>
+              {validation ? (
+                <div className="validation-grid">
+                  <div><span>IoU</span><strong>{Math.round(validation.iou * 100)}%</strong></div>
+                  <div><span>F1 score</span><strong>{Math.round(validation.f1 * 100)}%</strong></div>
+                  <div><span>POD</span><strong>{Math.round(validation.pod * 100)}%</strong></div>
+                  <div><span>False alarm</span><strong>{Math.round(validation.far * 100)}%</strong></div>
+                </div>
+              ) : <p className="validation-empty">Run the solver to compare the predicted flood envelope with Sentinel-1 water extent.</p>}
+              {impact && <small className="impact-note">GEE exposure cross-check: {impact.population[0].toLocaleString()}–{impact.population[1].toLocaleString()} people, {impact.buildings[0].toLocaleString()}–{impact.buildings[1].toLocaleString()} buildings.</small>}
+            </div>
           </div>
+        </section>
+
+        <section className="panel india-panel">
+          <div className="panel-header">
+            <div>
+              <span className="eyebrow muted">National basin index</span>
+              <h2>India dam-break coverage</h2>
+            </div>
+            <div className="chip subtle">{dams.length} active study sites</div>
+          </div>
+          <div className="india-map-stage">
+            <div className="india-outline" aria-hidden="true"><span>INDIA</span></div>
+            <div className="india-river river-one" />
+            <div className="india-river river-two" />
+            {dams.map((dam) => (
+              <button type="button" key={dam.id} className={`india-pin ${selectedDam.id === dam.id ? 'active' : ''}`} style={{ left: `${dam.mapX}%`, top: `${dam.mapY}%` }} onClick={() => handleSelectDam(dam)} aria-label={`Select ${dam.name}`}>
+                <i />
+                <span>{dam.name}</span>
+              </button>
+            ))}
+          </div>
+          <div className="india-map-footer"><span><i className="map-dot active-dot" /> Selected basin</span><span><i className="map-dot" /> Indexed dam</span><strong>{selectedDam.name} · {selectedDam.state}</strong></div>
         </section>
       </main>
     </div>
